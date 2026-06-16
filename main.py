@@ -2,14 +2,17 @@ import sys
 from pathlib import Path
 from rich import print as printr
 
+import gzip
+
 # Adjust these imports based on your exact package structure
 from xl_ray.extractor import (
     load_workbooks, 
     extract_metadata, 
     extract_vba_modules, 
     extract_named_ranges,
-    extract_tables  # <-- Import the new function
+    extract_worksheets  # Import it at the top
 )
+from xl_ray.schema import ExcelModelData
 
 def main():
     test_file = Path("example_audit.xlsm")
@@ -27,14 +30,19 @@ def main():
     print("Extracting Named Ranges...")
     named_ranges = extract_named_ranges(wb_formulas)
 
-    # --- NEW: Extracting Tables per Worksheet ---
-    print("Extracting Excel Tables...")
-    all_tables = []
-    for sheet in wb_formulas.worksheets:
-        sheet_tables = extract_tables(sheet)
-        if sheet_tables:
-            printr(f"  Found {len(sheet_tables)} table(s) on sheet '{sheet.title}'")
-            all_tables.extend(sheet_tables)
+    print("Extracting Worksheets, Cells, and Tables (this may take a moment)...")
+    worksheets = extract_worksheets(wb_formulas, wb_values)
+
+    # --- Derived Data for Previews and Metadata ---
+    # Flatten tables from all worksheets for our preview/flagging
+    all_tables = [table for ws in worksheets.values() for table in ws.tables]
+    
+    # Check for array formulas across all extracted cells
+    has_arrays = any(
+        cell.is_array_formula 
+        for ws in worksheets.values() 
+        for cell in ws.cells.values()
+    )
 
     print("Extracting metadata...")
     metadata = extract_metadata(
@@ -43,10 +51,12 @@ def main():
         vba_modules=vba_modules, 
         named_ranges=named_ranges
     )
-    # Update metadata based on our actual table extraction
+    
+    # Update dynamic flags
     metadata.has_data_tables = len(all_tables) > 0
+    metadata.has_array_formulas = has_arrays
 
-    # --- Display Table Previews ---
+    # --- Display Previews ---
     printr("\n--- Excel Tables Preview ---")
     if not all_tables:
         printr("- No tables found in workbook.")
@@ -56,6 +66,34 @@ def main():
 
     printr("\n--- Metadata Result ---")
     printr(metadata.model_dump_json(indent=2))
+
+    # Construct the root schema
+    print("Constructing root ExcelModelData...")
+    excel_model = ExcelModelData(
+        metadata=metadata,
+        worksheets=worksheets,
+        named_ranges=named_ranges,
+        vba_modules=vba_modules
+    )
+
+    # Save to compressed JSON
+    output_dir = Path("output")
+    output_dir.mkdir(exist_ok=True) # Ensure output directory exists
+    
+    # Use .json.gz extension to indicate it's a gzipped JSON file
+    output_file = output_dir / "extracted_model.json.gz" 
+    
+    print(f"\nSaving compressed final output to {output_file}...")
+    
+    # Dump the model to a JSON string first
+    json_data = excel_model.model_dump_json(indent=2)
+    
+    # Write it using gzip
+    with gzip.open(output_file, "wt", encoding="utf-8") as f:
+        f.write(json_data)
+        
+    printr(f"[green]Done! Saved to {output_file}[/green]")    
+
 
 if __name__ == "__main__":
     main()

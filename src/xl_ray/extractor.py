@@ -1,9 +1,82 @@
 from pathlib import Path
 from openpyxl import load_workbook
+from openpyxl.worksheet.formula import ArrayFormula
 
-from .schema import WorkbookMetadata, VBAModule, NamedRange, ExcelTable
+from .schema import WorkbookMetadata, VBAModule, NamedRange, ExcelTable, WorksheetData, CellData
 
 from oletools.olevba import VBA_Parser
+
+def extract_worksheets(wb_formulas, wb_values) -> dict[str, WorksheetData]:
+    """
+    Iterates through all worksheets, merges formula and value data, 
+    and returns a dictionary of WorksheetData schemas.
+    """
+    worksheets_data = {}
+    
+    # Iterate through sheets in both workbooks simultaneously
+    for sheet_f, sheet_v in zip(wb_formulas.worksheets, wb_values.worksheets):
+        sheet_name = sheet_f.title
+        
+        # Map sheet_state to schema's expected visibility strings
+        state_map = {"visible": "Visible", "hidden": "Hidden", "veryHidden": "VeryHidden"}
+        visibility = state_map.get(sheet_f.sheet_state, "Visible")
+        
+        cells_dict = {}
+        sheet_tables = extract_tables(sheet_f)
+        
+        # We need to iterate over all rows and cols that have data.
+        # values_only=False gives us the actual Cell objects.
+        for row_f, row_v in zip(sheet_f.iter_rows(values_only=False), sheet_v.iter_rows(values_only=False)):
+            for cell_f, cell_v in zip(row_f, row_v):
+                
+                # Skip empty cells to save memory and JSON bloat
+                if cell_f.value is None and cell_v.value is None:
+                    continue
+                    
+                address = cell_f.coordinate
+                
+                # Default cell parameters
+                formula_str = None
+                is_array = False
+                array_range = None
+                
+                # Check if it's a formula (data_type 'f')
+                if cell_f.data_type == 'f':
+                    val_f = cell_f.value
+                    if isinstance(val_f, str):
+                        formula_str = val_f
+                    elif isinstance(val_f, ArrayFormula):
+                        is_array = True
+                        formula_str = str(getattr(val_f, "text", None) or "")
+                        array_range = str(getattr(val_f, "ref", None) or "")
+                    else:
+                        # Fallback for other formula-bearing objects
+                        formula_str = str(getattr(val_f, "value", None) or val_f)
+                
+                # Determine data type based on the evaluated value
+                data_type = cell_v.data_type if cell_v.data_type else cell_f.data_type
+                
+                # Create the CellData instance
+                cells_dict[address] = CellData(
+                    address=address,
+                    value=cell_v.value,  # Cached value from the data_only workbook
+                    formula=formula_str,
+                    is_array_formula=is_array,
+                    array_range=array_range,
+                    data_type=data_type
+                    # Note: precedents, dependents, and parent_array_cell would require 
+                    # advanced parsing/AST logic which we are bypassing for now.
+                )
+                
+        worksheets_data[sheet_name] = WorksheetData(
+            name=sheet_name,
+            visibility=visibility,
+            cells=cells_dict,
+            tables=sheet_tables
+        )
+        
+    return worksheets_data
+
 
 def extract_vba_modules(path: Path) -> list[VBAModule]:
     """
