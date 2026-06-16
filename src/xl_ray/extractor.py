@@ -1,7 +1,7 @@
 from pathlib import Path
 from openpyxl import load_workbook
 
-from .schema import WorkbookMetadata, VBAModule, NamedRange
+from .schema import WorkbookMetadata, VBAModule, NamedRange, ExcelTable
 
 from oletools.olevba import VBA_Parser
 
@@ -85,6 +85,43 @@ def extract_named_ranges(wb) -> list[NamedRange]:
             continue
 
     return named_ranges
+
+def extract_tables(sheet) -> list[ExcelTable]:
+    """
+    Extract structured Excel Data Tables (ListObjects) from a single worksheet.
+    """
+    tables = []
+    
+    # openpyxl 3.x stores tables in sheet.tables, accessible via .values()
+    try:
+        sheet_tables = sheet.tables.values()
+    except AttributeError:
+        # Fallback for older openpyxl versions
+        raw = getattr(sheet, "_tables", None)
+        sheet_tables = raw.values() if isinstance(raw, dict) else (raw or [])
+
+    for table in sheet_tables:
+        if isinstance(table, str):
+            continue  # Safeguard against key leakage
+            
+        name = getattr(table, "name", None) or getattr(table, "displayName", "UnknownTable")
+        ref = getattr(table, "ref", None)
+        
+        # Extract column headers if available
+        columns = []
+        if hasattr(table, "tableColumns"):
+            for col in table.tableColumns:
+                if col.name:
+                    columns.append(col.name)
+
+        if name and ref:
+            tables.append(ExcelTable(
+                name=str(name),
+                range_address=str(ref),
+                columns=columns
+            ))
+
+    return tables
 
 def load_workbooks(path: Path):
     """

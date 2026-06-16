@@ -7,9 +7,9 @@ from xl_ray.extractor import (
     load_workbooks, 
     extract_metadata, 
     extract_vba_modules, 
-    extract_named_ranges
+    extract_named_ranges,
+    extract_tables  # <-- Import the new function
 )
-from xl_ray.schema import WorkbookMetadata 
 
 def main():
     test_file = Path("example_audit.xlsm")
@@ -19,21 +19,23 @@ def main():
         sys.exit(1)
 
     print(f"Loading '{test_file.name}'...")
-    
-    # 1. Dual-load the workbooks
     wb_formulas, wb_values = load_workbooks(test_file)
-    print("Workbooks loaded successfully.")
 
-    # 2. Extract VBA and Named Ranges
     print("Extracting VBA modules...")
     vba_modules = extract_vba_modules(test_file)
-    print(f"Found {len(vba_modules)} VBA modules.")
 
     print("Extracting Named Ranges...")
     named_ranges = extract_named_ranges(wb_formulas)
-    print(f"Found {len(named_ranges)} named ranges.")
 
-    # 3. Extract metadata
+    # --- NEW: Extracting Tables per Worksheet ---
+    print("Extracting Excel Tables...")
+    all_tables = []
+    for sheet in wb_formulas.worksheets:
+        sheet_tables = extract_tables(sheet)
+        if sheet_tables:
+            printr(f"  Found {len(sheet_tables)} table(s) on sheet '{sheet.title}'")
+            all_tables.extend(sheet_tables)
+
     print("Extracting metadata...")
     metadata = extract_metadata(
         path=test_file, 
@@ -41,15 +43,16 @@ def main():
         vba_modules=vba_modules, 
         named_ranges=named_ranges
     )
+    # Update metadata based on our actual table extraction
+    metadata.has_data_tables = len(all_tables) > 0
 
-    # 4. Display the results
-    printr("\n--- VBA Modules Preview ---")
-    for vba in vba_modules:
-        printr(f"- {vba.filename}: {len(vba.content)} characters")
-
-    printr("\n--- Named Ranges Preview ---")
-    for nr in named_ranges[:5]:  # Just show the first 5 so it doesn't flood the terminal
-        printr(f"- {nr.name} ({nr.scope}): {nr.refers_to}")
+    # --- Display Table Previews ---
+    printr("\n--- Excel Tables Preview ---")
+    if not all_tables:
+        printr("- No tables found in workbook.")
+    for table in all_tables:
+        printr(f"- [bold]{table.name}[/bold] (Range: {table.range_address})")
+        printr(f"  Columns: {table.columns}")
 
     printr("\n--- Metadata Result ---")
     printr(metadata.model_dump_json(indent=2))
