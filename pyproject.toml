@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "xl-ray"
+dynamic = ["version"]
+description = 'Interrogate Excel and create LLM prompts'
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+keywords = []
+authors = [
+  { name = "TomMonks", email = "thomas.m.monks@gmail.com" },
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = []
+
+[project.urls]
+Documentation = "https://github.com/TomMonks/xl-ray#readme"
+Issues = "https://github.com/TomMonks/xl-ray/issues"
+Source = "https://github.com/TomMonks/xl-ray"
+
+[tool.hatch.version]
+path = "src/xl_ray/__init__.py"
+
+[tool.hatch.envs.types]
+extra-dependencies = [
+  "mypy>=1.0.0",
+]
+[tool.hatch.envs.types.scripts]
+check = "mypy --install-types --non-interactive {args:src/xl_ray tests}"
+
+[tool.coverage.run]
+source_pkgs = ["xl_ray", "tests"]
+branch = true
+parallel = true
+
+[tool.coverage.paths]
+xl_ray = ["src/xl_ray", "*/xl-ray/src/xl_ray"]
+tests = ["tests", "*/xl-ray/tests"]
+
+[tool.coverage.report]
+exclude_lines = [
+  "no cov",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]
