@@ -7,6 +7,7 @@ dependencies:
   - pip=26.1.2
   - openpyxl=3.1.5
   - pandas=3.0.3
+  - python=3.13
   - typer=0.26.7
   - oletools=0.60.2
   - pydantic=2.13.4
