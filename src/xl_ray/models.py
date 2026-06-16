@@ -61,6 +61,7 @@ class VBAModule(BaseModel):
 class WorkbookMetadata(BaseModel):
     """High-level metadata regarding the source Excel file to provide an immediate summary."""
     file_name: str = Field(description="The name of the source Excel file.")
+    file_path: str = Field(description="The absolute or relative path to the source Excel file.")
     file_type: str = Field(description="The file extension/type (e.g., '.xlsx', '.xlsm').")
     
     # Feature flags for quick auditing triage
