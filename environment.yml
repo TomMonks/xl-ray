@@ -1,0 +1,13 @@
+name: xl-ray
+channels:
+  - conda-forge
+dependencies:
+  - hatch
+  - python=3.12
+  - pip=26.1.2
+  - openpyxl=3.1.5
+  - pandas=3.0.3
+  - typer=0.26.7
+  - oletools=0.60.2
+  - pytest=9.0.3
+
