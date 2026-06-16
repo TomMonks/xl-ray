@@ -76,6 +76,43 @@ def main():
         vba_modules=vba_modules
     )
 
+    # --- OPTIONAL: Quick check for precedents ---
+    printr("\n--- Precedents Check Preview ---")
+    formula_count = 0
+    for ws in worksheets.values():
+        for cell in ws.cells.values():
+            if cell.formula and cell.precedents:
+                printr(f"- {ws.name}!{cell.address} -> {cell.formula}")
+                printr(f"  Precedents: {cell.precedents}")
+                formula_count += 1
+                if formula_count >= 5: # Just show the first 5
+                    break
+        if formula_count >= 5:
+            break
+
+    # --- OPTIONAL: Quick check for array formulas ---
+    printr("\n--- Array Formulas Check Preview ---")
+    array_count = 0
+    for ws in worksheets.values():
+        for cell in ws.cells.values():
+            if cell.is_array_formula:
+                if cell.array_range:
+                    printr(f"- [bold cyan]Parent Array Cell[/bold cyan]: {ws.name}!{cell.address} | Formula: {cell.formula} | Spills to: {cell.array_range}")
+                    array_count += 1
+                elif cell.parent_array_cell:
+                    # Print a child cell, showing its value and where it points back to
+                    printr(f"  - [magenta]Spilled Child Cell[/magenta]: {ws.name}!{cell.address} | Value: {cell.value} | Parent: {cell.parent_array_cell}")
+                    array_count += 1
+            
+            # Stop after showing around 10 examples so we don't flood the terminal
+            if array_count >= 10:
+                break
+        if array_count >= 10:
+            break
+            
+    if array_count == 0:
+        printr("- No array formulas found in this test workbook.")
+
     # Save to compressed JSON
     output_dir = Path("output")
     output_dir.mkdir(exist_ok=True) # Ensure output directory exists
