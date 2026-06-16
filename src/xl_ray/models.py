@@ -10,6 +10,16 @@ class CellData(BaseModel):
     address: str = Field(description="The A1 reference style address of the cell (e.g., 'A1').")
     value: Any = Field(default=None, description="The evaluated, cached value of the cell.")
     formula: Optional[str] = Field(default=None, description="The raw Excel formula, if present.")
+
+    precedents: list[str] = Field(
+        default_factory=list, 
+        description="List of cell addresses or named ranges this cell references (its inputs)."
+    )
+    
+    dependents: list[str] = Field(
+        default_factory=list, 
+        description="List of cell addresses that reference this cell (its outputs)."
+    )
     
     # Updated fields for array formulas:
     is_array_formula: bool = Field(default=False, description="True if the cell is part of an array formula.")
