@@ -59,10 +59,20 @@ class VBAModule(BaseModel):
     content: str = Field(description="The raw text content of the VBA code.")
 
 class WorkbookMetadata(BaseModel):
-    """High-level metadata regarding the source Excel file."""
+    """High-level metadata regarding the source Excel file to provide an immediate summary."""
     file_name: str = Field(description="The name of the source Excel file.")
     file_type: str = Field(description="The file extension/type (e.g., '.xlsx', '.xlsm').")
+    
+    # Feature flags for quick auditing triage
     has_macros: bool = Field(default=False, description="True if the workbook contains VBA macros.")
+    has_array_formulas: bool = Field(default=False, description="True if the workbook utilizes array formulas.")
+    has_data_tables: bool = Field(default=False, description="True if the workbook contains Excel Data Tables (ListObjects).")
+    has_named_ranges: bool = Field(default=False, description="True if the workbook has defined named ranges.")
+    has_hidden_sheets: bool = Field(default=False, description="True if the workbook contains Hidden or VeryHidden sheets.")
+    has_external_links: bool = Field(default=False, description="True if the workbook links to external workbooks.")
+    
+    # Optional: Quick counts can also be helpful for the auditor to gauge complexity
+    worksheet_count: int = Field(default=0, description="Total number of worksheets.")
 
 class ExcelModelData(BaseModel):
     """
