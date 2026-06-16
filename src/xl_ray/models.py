@@ -1,3 +1,7 @@
+"""
+Defines schema for extracted Excel workbook
+"""
+
 from typing import Any, Optional
 from pydantic import BaseModel, Field
 
@@ -6,8 +10,19 @@ class CellData(BaseModel):
     address: str = Field(description="The A1 reference style address of the cell (e.g., 'A1').")
     value: Any = Field(default=None, description="The evaluated, cached value of the cell.")
     formula: Optional[str] = Field(default=None, description="The raw Excel formula, if present.")
+    
+    # Updated fields for array formulas:
     is_array_formula: bool = Field(default=False, description="True if the cell is part of an array formula.")
-    data_type: Optional[str] = Field(default=None, description="The data type of the cell's evaluated value (e.g., 'float', 'str', 'error').")
+    array_range: Optional[str] = Field(
+        default=None, 
+        description="The range this array formula spills over (e.g., 'A1:A5'). Populated on the top-left cell."
+    )
+    parent_array_cell: Optional[str] = Field(
+        default=None, 
+        description="If this cell is part of an array but not the top-left cell, this points to the cell with the formula."
+    )
+    
+    data_type: Optional[str] = Field(default=None, description="The data type of the cell's evaluated value.")
 
 class NamedRange(BaseModel):
     """Represents an Excel defined name (named range)."""
