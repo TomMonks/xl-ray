@@ -1,7 +1,90 @@
 from pathlib import Path
 from openpyxl import load_workbook
 
-from .schema import WorkbookMetadata
+from .schema import WorkbookMetadata, VBAModule, NamedRange
+
+from oletools.olevba import VBA_Parser
+
+def extract_vba_modules(path: Path) -> list[VBAModule]:
+    """
+    Extract VBA macros from the workbook and return them as VBAModule schemas.
+    """
+    if VBA_Parser is None:
+        print("Warning: oletools not installed. Skipping VBA extraction.")
+        return []
+
+    modules = []
+    try:
+        parser = VBA_Parser(str(path))
+        if parser.detect_vba_macros():
+            # oletools extract_all_macros yields: (filename, stream_path, vba_filename, vba_code)
+            for _, _, filename, content in parser.extract_all_macros():
+                # Handle potential bytes output from oletools
+                if isinstance(content, bytes):
+                    content = content.decode("utf-8", errors="ignore")
+                else:
+                    content = str(content) if content is not None else ""
+                
+                modules.append(VBAModule(
+                    filename=str(filename) or "Unknown",
+                    content=content
+                ))
+    except Exception as e:
+        print(f"Warning: Failed to extract VBA modules - {e}")
+    finally:
+        if 'parser' in locals():
+            parser.close()
+            
+    return modules
+
+
+def extract_named_ranges(wb) -> list[NamedRange]:
+    """
+    Extract workbook and worksheet scoped named ranges.
+    """
+    named_ranges = []
+    
+    # openpyxl >= 3.1 stores defined names in a dict-like object
+    try:
+        if hasattr(wb, "defined_names") and hasattr(wb.defined_names, "values"):
+            dn_iter = wb.defined_names.values()
+        else:
+            dn_iter = wb.defined_names.definedName  # openpyxl < 3.1
+    except AttributeError:
+        return named_ranges
+
+    for dn in dn_iter:
+        if isinstance(dn, str): 
+            continue  # Safeguard if iteration yields dict keys directly
+        
+        try:
+            name = getattr(dn, "name", None)
+            # The formula/reference is usually in 'attr_text' or 'value'
+            refers_to = getattr(dn, "attr_text", None) or getattr(dn, "value", None)
+            
+            if not name or not refers_to:
+                continue
+
+            # Determine scope. localSheetId is not None if scoped to a specific sheet.
+            localSheetId = getattr(dn, "localSheetId", None)
+            if localSheetId is not None:
+                try:
+                    scope = wb.worksheets[int(localSheetId)].title
+                except (IndexError, ValueError, TypeError):
+                    scope = f"SheetId_{localSheetId}"
+            else:
+                scope = "Workbook"
+
+            named_ranges.append(NamedRange(
+                name=str(name),
+                refers_to=str(refers_to),
+                scope=scope
+            ))
+        except Exception as e:
+            print(f"Warning: Failed to parse a named range - {e}")
+            continue
+
+    return named_ranges
 
 def load_workbooks(path: Path):
     """
