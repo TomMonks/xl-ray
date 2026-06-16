@@ -1,7 +1,7 @@
 from pathlib import Path
 from openpyxl import load_workbook
-# Assuming your schema is in a file named schema.py
-from schema import WorkbookMetadata
+
+from .schema import WorkbookMetadata
 
 def load_workbooks(path: Path):
     """
