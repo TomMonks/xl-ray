@@ -164,3 +164,72 @@ def detect_broken_references(model_data: ExcelModelData) -> List[Dict[str, Any]]
                 })
                 
     return flagged_cells
+
+
+def detect_inconsistent_columns(model_data: ExcelModelData) -> List[Dict[str, Any]]:
+    """
+    Scans contiguous columns of formulas to find cells that break the established pattern.
+    Useful for finding manual overrides ('fudge factors') in Markov traces or data tables.
+    """
+    flagged_cells = []
+    
+    # Helper to strip row numbers out of references (e.g., '=B12 * 2' -> '=B_ROW * 2')
+    # This allows us to compare relative formula structures down a column.
+    def abstract_formula(f_str):
+        if not f_str: 
+            return ""
+        # Match column letters followed by row numbers and replace the number
+        return re.compile(r'([A-Za-z]+)\d+').sub(r'\1_ROW', f_str)
+
+    # Helper to parse A1 coordinate into column letter and row number
+    coord_pattern = re.compile(r'^([A-Za-z]+)(\d+)$')
+
+    for ws_name, ws_data in model_data.worksheets.items():
+        # 1. Group formula cells by column
+        cols = {}
+        for addr, cell in ws_data.cells.items():
+            if not cell.formula: 
+                continue
+            
+            match = coord_pattern.match(addr)
+            if match:
+                c_let, r_num = match.groups()
+                r_num = int(r_num)
+                if c_let not in cols: 
+                    cols[c_let] = []
+                cols[c_let].append((r_num, cell))
+                
+        # 2. Check each column for inconsistencies
+        for c_let, row_cells in cols.items():
+            # Sort by row number
+            row_cells.sort(key=lambda x: x[0])
+            
+            # We need at least 3 contiguous cells to establish a broken pattern
+            # (e.g., Row 1 matches Row 3, but Row 2 is different)
+            if len(row_cells) < 3: 
+                continue
+            
+            for i in range(1, len(row_cells) - 1):
+                prev_r, prev_cell = row_cells[i-1]
+                curr_r, curr_cell = row_cells[i]
+                next_r, next_cell = row_cells[i+1]
+                
+                # Ensure the three cells are perfectly contiguous (no blank rows between them)
+                if curr_r != prev_r + 1 or next_r != curr_r + 1:
+                    continue
+                    
+                prev_abs = abstract_formula(prev_cell.formula)
+                curr_abs = abstract_formula(curr_cell.formula)
+                next_abs = abstract_formula(next_cell.formula)
+                
+                # Detect an override: the cell before and after match, but the current one doesn't
+                if prev_abs == next_abs and curr_abs != prev_abs:
+                    flagged_cells.append({
+                        "sheet": ws_name,
+                        "cell": curr_cell.address,
+                        "formula": curr_cell.formula,
+                        "expected_pattern": prev_abs.replace("_ROW", "[row]"),
+                        "actual_pattern": curr_abs.replace("_ROW", "[row]")
+                    })
+                    
+    return flagged_cells

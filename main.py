@@ -14,7 +14,12 @@ from xl_ray.extractor import (
 )
 from xl_ray.schema import ExcelModelData
 
-from xl_ray.audit import detect_magic_numbers, detect_hidden_logic, detect_broken_references
+from xl_ray.audit import (
+    detect_magic_numbers, 
+    detect_hidden_logic, 
+    detect_broken_references,
+    detect_inconsistent_columns,
+)
 
 def main():
     test_file = Path("example_audit.xlsm")
@@ -146,6 +151,16 @@ def main():
             printr(f"  - {item['sheet']}!{item['cell']}: `{item['formula']}` (Issues: {item['issues_found']})")
     else:
         printr("[green]No broken references found![/green]")
+
+    printr("\n--- Audit: Inconsistent Column Formulas ---")
+    inconsistent_cols = detect_inconsistent_columns(excel_model)
+    if inconsistent_cols:
+        printr(f"[red]Found {len(inconsistent_cols)} cells with inconsistent formula patterns.[/red]")
+        for item in inconsistent_cols[:5]:
+            printr(f"  - {item['sheet']}!{item['cell']}: `{item['formula']}`")
+            printr(f"    Expected: {item['expected_pattern']} | Actual: {item['actual_pattern']}")
+    else:
+        printr("[green]No column formula inconsistencies found![/green]")    
 
         
     # ... (Then save your JSON) ...
