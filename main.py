@@ -14,6 +14,8 @@ from xl_ray.extractor import (
 )
 from xl_ray.schema import ExcelModelData
 
+from xl_ray.audit import detect_magic_numbers, detect_hidden_logic
+
 def main():
     test_file = Path("example_audit.xlsm")
 
@@ -112,6 +114,33 @@ def main():
             
     if array_count == 0:
         printr("- No array formulas found in this test workbook.")
+
+    # --- Run Deterministic Audits ---
+    
+
+    printr("\n--- Audit: Magic Numbers ---")
+    magic_numbers = detect_magic_numbers(excel_model)
+    if magic_numbers:
+        printr(f"[red]Found {len(magic_numbers)} cells with hardcoded magic numbers.[/red]")
+        for item in magic_numbers[:5]: # Show first 5
+            printr(f"  - {item['sheet']}!{item['cell']}: `{item['formula']}` (Found: {item['magic_numbers_found']})")
+    else:
+        printr("[green]No magic numbers found![/green]")
+
+
+    printr("\n--- Audit: Hidden Logic ---")
+    hidden_logic = detect_hidden_logic(excel_model)
+    if hidden_logic:
+        printr(f"[red]Found {len(hidden_logic)} cells referencing hidden sheets.[/red]")
+        for item in hidden_logic[:5]:
+            printr(f"  - {item['sheet']}!{item['cell']}: `{item['formula']}` -> Pulls from {item['hidden_references']}")
+    else:
+        printr("[green]No hidden logic dependencies found![/green]")
+        
+    # ... (Then save your JSON) ...
+
+
+
 
     # Save to compressed JSON
     output_dir = Path("output")
