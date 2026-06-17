@@ -87,3 +87,80 @@ def detect_hidden_logic(model_data: ExcelModelData) -> List[Dict[str, Any]]:
                 })
                 
     return flagged_cells
+
+
+def detect_broken_references(model_data: ExcelModelData) -> List[Dict[str, Any]]:
+    """
+    Identifies cells that contain explicit #REF! errors or rely on 
+    precedents that evaluate to Excel error states or are completely empty.
+    Handles named ranges and ignores block ranges.
+    """
+    flagged_cells = []
+    error_states = {"#DIV/0!", "#N/A", "#NAME?", "#NULL!", "#NUM!", "#REF!", "#VALUE!"}
+    
+    # Helper to check if a string looks like a single coordinate (A1, Z99)
+    # This prevents us from trying to look up block ranges like 'A1:A10'
+    coord_pattern = re.compile(r'^[A-Za-z]+\d+$')
+
+    for ws_name, ws_data in model_data.worksheets.items():
+        for cell_address, cell in ws_data.cells.items():
+            issues = []
+            
+            if cell.formula and "#REF!" in cell.formula:
+                issues.append("Formula contains explicit #REF!")
+                
+            if cell.precedents:
+                for precedent in cell.precedents:
+                    target_sheet = ws_name
+                    target_cell = precedent
+                    
+                    # 1. Is it a Named Range?
+                    is_named_range = False
+                    for nr in model_data.named_ranges:
+                        if nr.name == precedent:
+                            is_named_range = True
+                            # Extract target sheet and cell from the refers_to string
+                            # e.g., 'Sheet1'!$A$1 -> Sheet1, A1
+                            ref_clean = nr.refers_to.replace('$', '')
+                            if "!" in ref_clean:
+                                target_sheet = ref_clean.split("!")[0].replace("'", "").replace("=", "")
+                                target_cell = ref_clean.split("!")[1]
+                            else:
+                                target_cell = ref_clean.replace("=", "")
+                            break
+                            
+                    # 2. Handle standard cross-sheet references if it wasn't a named range
+                    if not is_named_range and "!" in precedent:
+                        parts = precedent.split("!")
+                        target_sheet = parts[0].replace("'", "")
+                        target_cell = parts[1]
+
+                    # 3. Skip Block Ranges (e.g., D13:D14). We only check single target cells.
+                    if ":" in target_cell or not coord_pattern.match(target_cell):
+                        continue
+
+                    # 4. Check if the target sheet exists
+                    if target_sheet not in model_data.worksheets:
+                        issues.append(f"Broken sheet link: {target_sheet}")
+                        continue
+                        
+                    target_ws = model_data.worksheets[target_sheet]
+                    
+                    # 5. Check if the target cell exists and what its value is
+                    if target_cell not in target_ws.cells:
+                        issues.append(f"Precedent '{precedent}' (resolved to {target_cell}) is blank/missing")
+                    else:
+                        target_val = target_ws.cells[target_cell].value
+                        if str(target_val) in error_states:
+                            issues.append(f"Precedent '{precedent}' evaluates to error: {target_val}")
+
+            if issues:
+                flagged_cells.append({
+                    "sheet": ws_name,
+                    "cell": cell_address,
+                    "formula": cell.formula,
+                    "value": cell.value,
+                    "issues_found": issues
+                })
+                
+    return flagged_cells

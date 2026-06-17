@@ -14,7 +14,7 @@ from xl_ray.extractor import (
 )
 from xl_ray.schema import ExcelModelData
 
-from xl_ray.audit import detect_magic_numbers, detect_hidden_logic
+from xl_ray.audit import detect_magic_numbers, detect_hidden_logic, detect_broken_references
 
 def main():
     test_file = Path("example_audit.xlsm")
@@ -136,6 +136,17 @@ def main():
             printr(f"  - {item['sheet']}!{item['cell']}: `{item['formula']}` -> Pulls from {item['hidden_references']}")
     else:
         printr("[green]No hidden logic dependencies found![/green]")
+
+    
+    printr("\n--- Audit: Broken References ---")
+    broken_refs = detect_broken_references(excel_model)
+    if broken_refs:
+        printr(f"[red]Found {len(broken_refs)} cells with broken or error-state references.[/red]")
+        for item in broken_refs[:5]:
+            printr(f"  - {item['sheet']}!{item['cell']}: `{item['formula']}` (Issues: {item['issues_found']})")
+    else:
+        printr("[green]No broken references found![/green]")
+
         
     # ... (Then save your JSON) ...
 
