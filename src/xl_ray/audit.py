@@ -233,3 +233,138 @@ def detect_inconsistent_columns(model_data: ExcelModelData) -> List[Dict[str, An
                     })
                     
     return flagged_cells
+
+def detect_complex_logic(
+    model_data: ExcelModelData, 
+    max_depth_threshold: int = 7, 
+    complexity_score_threshold: int = 25
+) -> List[Dict[str, Any]]:
+    """
+    Identifies cells with highly complex formulas or deep dependency chains.
+    
+    This function traverses the parsed Excel model to find formulas that exceed 
+    a calculated structural complexity score or a specified dependency chain 
+    depth. It deduplicates identical formula patterns across rows to prevent 
+    flooding the output with repeating column logic.
+
+    Parameters
+    ----------
+    model_data : ExcelModelData
+        The parsed representation of the Excel workbook containing worksheets, 
+        cells, and parsed precedents.
+    max_depth_threshold : int, optional
+        The maximum number of levels a dependency chain can go before it is 
+        flagged as 'Deep Logic'. For example, if A1 relies on A2, which relies 
+        on A3, the depth is 2. The default is 7.
+    complexity_score_threshold : int, optional
+        The maximum structural complexity score allowed before a formula is 
+        flagged. The score is calculated based on parenthesis nesting, the total 
+        number of functions, and the presence of specific high-risk functions 
+        (e.g., VLOOKUP, OFFSET). The default is 25.
+
+    Returns
+    -------
+    List[Dict[str, Any]]
+        A list of dictionaries representing the flagged cells. Each dictionary 
+        contains 'sheet', 'cell', 'formula', 'chain_depth', 'complexity_score', 
+        and 'flag_reason'. The list is sorted in descending order by complexity 
+        score and then by chain depth.
+    """
+    
+    flagged_cells = []
+    depth_cache = {}
+    seen_patterns = set()
+
+    # Helper to strip row numbers out of references for deduplication
+    def abstract_formula(f_str):
+        if not f_str: return ""
+        return re.compile(r'([A-Za-z]+)\d+').sub(r'\1_ROW', f_str)
+
+    def calculate_depth(sheet_name: str, cell_address: str, current_path: set) -> int:
+        cache_key = f"{sheet_name}!{cell_address}"
+        if cache_key in current_path:
+            return 0 
+        if cache_key in depth_cache:
+            return depth_cache[cache_key]
+            
+        ws = model_data.worksheets.get(sheet_name)
+        if not ws or cell_address not in ws.cells:
+            return 0
+            
+        cell = ws.cells[cell_address]
+        if not cell.precedents:
+            depth_cache[cache_key] = 0
+            return 0
+            
+        max_child_depth = 0
+        current_path.add(cache_key)
+        
+        for precedent in cell.precedents:
+            target_sheet = sheet_name
+            target_cell = precedent
+            if "!" in precedent:
+                parts = precedent.split("!")
+                target_sheet = parts[0].replace("'", "")
+                target_cell = parts[1]
+                
+            if ":" in target_cell:
+                continue
+                
+            depth = calculate_depth(target_sheet, target_cell, current_path)
+            if depth > max_child_depth:
+                max_child_depth = depth
+                
+        current_path.remove(cache_key)
+        final_depth = max_child_depth + 1
+        depth_cache[cache_key] = final_depth
+        return final_depth
+
+    def calculate_complexity_score(formula: str) -> int:
+        if not formula: return 0
+        score = 0
+        
+        current_nesting = 0
+        max_nesting = 0
+        for char in formula:
+            if char == '(': current_nesting += 1
+            elif char == ')': current_nesting -= 1
+            if current_nesting > max_nesting: max_nesting = current_nesting
+        score += max_nesting * 2 
+        
+        functions = re.findall(r'([A-Za-z_]+)\(', formula)
+        score += len(functions)
+        
+        complex_funcs = {"VLOOKUP", "INDEX", "MATCH", "OFFSET", "INDIRECT", "IFERROR", "SUMIFS"}
+        for func in functions:
+            if func.upper() in complex_funcs:
+                score += 2
+                
+        return score
+
+    # Run the checks
+    for ws_name, ws_data in model_data.worksheets.items():
+        for cell_address, cell in ws_data.cells.items():
+            if not cell.formula:
+                continue
+                
+            depth = calculate_depth(ws_name, cell_address, set())
+            complexity = calculate_complexity_score(cell.formula)
+            
+            if depth > max_depth_threshold or complexity > complexity_score_threshold:
+                # Check for deduplication
+                abs_f = abstract_formula(cell.formula)
+                if abs_f in seen_patterns:
+                    continue
+                seen_patterns.add(abs_f)
+                
+                flagged_cells.append({
+                    "sheet": ws_name,
+                    "cell": cell_address,
+                    "formula": cell.formula,
+                    "chain_depth": depth,
+                    "complexity_score": complexity,
+                    "flag_reason": "Deep Logic Chain" if depth > max_depth_threshold else "Highly Complex Formula"
+                })
+                
+    flagged_cells.sort(key=lambda x: (x["complexity_score"], x["chain_depth"]), reverse=True)
+    return flagged_cells

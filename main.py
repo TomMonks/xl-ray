@@ -19,7 +19,9 @@ from xl_ray.audit import (
     detect_hidden_logic, 
     detect_broken_references,
     detect_inconsistent_columns,
+    detect_complex_logic,
 )
+
 
 def main():
     test_file = Path("example_audit.xlsm")
@@ -161,6 +163,18 @@ def main():
             printr(f"    Expected: {item['expected_pattern']} | Actual: {item['actual_pattern']}")
     else:
         printr("[green]No column formula inconsistencies found![/green]")    
+
+
+    printr("\n--- Audit: Logic Complexity & Depth ---")
+    complex_logic = detect_complex_logic(excel_model, max_depth_threshold=10, complexity_score_threshold=8)
+    
+    if complex_logic:
+        printr(f"[red]Found {len(complex_logic)} highly complex cells.[/red]")
+        for item in complex_logic[:5]:
+            printr(f"  - {item['sheet']}!{item['cell']}: `{item['formula']}`")
+            printr(f"    Reason: {item['flag_reason']} | Score: {item['complexity_score']} | Depth: {item['chain_depth']}")
+    else:
+        printr("[green]No overly complex logic chains found![/green]")
 
         
     # ... (Then save your JSON) ...
