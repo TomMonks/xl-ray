@@ -58,7 +58,7 @@ if uploaded_file is not None:
 
             try:
                 wb_formulas, wb_values = load_workbooks(tmp_path)
-                vba_modules = extract_vba_modules(tmp_path)
+                vba_modules = extract_vba_modules(tmp_path, wb_formulas)
                 named_ranges = extract_named_ranges(wb_formulas)
                 worksheets = extract_worksheets(wb_formulas, wb_values)
                 
@@ -310,25 +310,18 @@ if uploaded_file is not None:
             st.markdown("Review the raw VBA code embedded in the workbook.")
             
             if data.vba_modules:
-                # Handle whether data.vba_modules is a list of objects or dictionaries
-                if isinstance(data.vba_modules, dict):
-                    # Just in case it's parsed as a dict map
-                    modules_items = [(k, v.get('content', v) if isinstance(v, dict) else v) for k, v in data.vba_modules.items()]
-                else:
-                    # It's a list of schema objects (like Pydantic models)
-                    modules_items = []
-                    for i, m in enumerate(data.vba_modules):
-                        # Handle both dictionary and object access safely
-                        name = m.get('filename', f"Module {i}") if isinstance(m, dict) else getattr(m, 'filename', f"Module {i}")
-                        content = m.get('content', "") if isinstance(m, dict) else getattr(m, 'content', "")
-                        modules_items.append((name, content))
-
-                # Iterate through the modules and create an expander for each
-                for mod_name, mod_code in modules_items:
-                    display_code = mod_code if mod_code else "' No code found in this module."
+                for mod in data.vba_modules:
+                    display_title = f"📝 {mod.filename}"
                     
-                    with st.expander(f"📝 {mod_name}"):
-                        # Streamlit natively supports VBA syntax highlighting
+                    # Use the new schema property directly!
+                    if mod.linked_worksheet:
+                        display_title += f" — 🏷️ Worksheet: '{mod.linked_worksheet}'"
+                    elif mod.filename.lower().endswith(".cls") and "thisworkbook" not in mod.filename.lower():
+                        display_title += " — 🏷️ Worksheet module"
+                    
+                    display_code = mod.content if mod.content else "' No code found in this module."
+                    
+                    with st.expander(display_title):
                         st.code(display_code, language="vba")
             else:
                 st.info("No VBA macros or modules were found in this workbook.")

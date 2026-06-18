@@ -119,7 +119,7 @@ def extract_worksheets(wb_formulas, wb_values) -> dict[str, WorksheetData]:
     return worksheets_data
 
 
-def extract_vba_modules(path: Path) -> list[VBAModule]:
+def extract_vba_modules(path: Path, wb_formulas) -> list[VBAModule]:
     """
     Extract VBA macros from the workbook and return them as VBAModule schemas.
     """
@@ -127,28 +127,42 @@ def extract_vba_modules(path: Path) -> list[VBAModule]:
         print("Warning: oletools not installed. Skipping VBA extraction.")
         return []
 
+    # --- NEW: Build the CodeName -> Sheet Name map ---
+    codename_to_tab = {}
+    for sheet in wb_formulas.worksheets:
+        try:
+            code_name = sheet.sheet_properties.codeName
+            if code_name:
+                codename_to_tab[code_name.lower()] = sheet.title
+        except AttributeError:
+            continue
+
     modules = []
     try:
         parser = VBA_Parser(str(path))
         if parser.detect_vba_macros():
-            # oletools extract_all_macros yields: (filename, stream_path, vba_filename, vba_code)
             for _, _, filename, content in parser.extract_all_macros():
-                # Handle potential bytes output from oletools
                 if isinstance(content, bytes):
                     content = content.decode("utf-8", errors="ignore")
                 else:
                     content = str(content) if content is not None else ""
-                
+
+                # --- NEW: Check if this file maps to a worksheet ---
+                safe_filename = str(filename) or "Unknown"
+                base_name = safe_filename.split(".")[0].lower() # e.g., 'Sheet1.cls' -> 'sheet1'
+                linked_sheet = codename_to_tab.get(base_name)
+
                 modules.append(VBAModule(
-                    filename=str(filename) or "Unknown",
-                    content=content
+                    filename=safe_filename,
+                    content=content,
+                    linked_worksheet=linked_sheet  # --- NEW ---
                 ))
     except Exception as e:
         print(f"Warning: Failed to extract VBA modules - {e}")
     finally:
         if 'parser' in locals():
             parser.close()
-            
+
     return modules
 
 

@@ -57,6 +57,12 @@ class VBAModule(BaseModel):
     """Represents a VBA code module extracted from the workbook."""
     filename: str = Field(description="The name of the VBA module file/component.")
     content: str = Field(description="The raw text content of the VBA code.")
+    
+    # --- NEW FIELD ---
+    linked_worksheet: Optional[str] = Field(
+        default=None, 
+        description="The user-facing name of the worksheet this module is attached to (if it is a Sheet object)."
+    )
 
 class WorkbookMetadata(BaseModel):
     """High-level metadata regarding the source Excel file to provide an immediate summary."""
