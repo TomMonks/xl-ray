@@ -326,28 +326,241 @@ if uploaded_file is not None:
             else:
                 st.info("No VBA macros or modules were found in this workbook.")
                 
+        # --- NEW: Raw JSON Export Tab with ZIP Compression ---
         with tab4:
-            st.markdown("Download the fully extracted structured JSON data.")
-            json_bytes = gzip.compress(data.model_dump_json(indent=2).encode('utf-8'))
+            st.subheader("🔍 Extracted JSON Data")
+            st.markdown("Download the fully extracted structural data. This file is required for the 'Full Workbook' LLM prompt.")
+            
+            # 1. Get the JSON string
+            json_data = data.model_dump_json(indent=2)
+            
+            # 2. Create the raw JSON download button for small models
             st.download_button(
-                label="Download Compressed JSON (.json.gz)",
-                data=json_bytes,
-                file_name=f"{data.metadata.file_name}_xlray.json.gz",
-                mime="application/gzip"
+                label="📄 Download Raw JSON (Uncompressed)",
+                data=json_data,
+                file_name=f"{st.session_state.current_file}_xlray.json",
+                mime="application/json"
             )
             
-            with st.expander("View JSON Snippet"):
-                st.json(data.metadata.model_dump())
-                
-        with tab5:
-            st.subheader("Generate Prompt for Enterprise Copilot")
-            st.markdown("Copy this prompt and paste it directly into Microsoft Copilot.")
+            st.markdown("---")
+            st.markdown("### LLM Export (Recommended)")
+            st.markdown("For large models, Copilot/ChatGPT may reject 20MB+ files. Use this ZIP format for LLM uploads.")
             
-            system_instructions = f"""You are an expert health economist auditing an Excel model.
-Please review the following extracted model logic for potential errors.
+            # 3. Create the ZIP file in memory
+            import zipfile
+            import io
+            
+            zip_buffer = io.BytesIO()
+            # Compress the JSON string into the zip buffer
+            with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+                zip_filename = f"{st.session_state.current_file}_xlray.json"
+                zf.writestr(zip_filename, json_data)
+                
+            # 4. Provide the ZIP download button
+            st.download_button(
+                label="🗜️ Download ZIP (For LLM Upload)",
+                data=zip_buffer.getvalue(),
+                file_name=f"{st.session_state.current_file}_xlray.zip",
+                mime="application/zip",
+                type="primary" # Highlight this button
+            )
+                
+        # --- NEW: LLM Copilot Prompt Builder ---
+        with tab5: # (or whichever tab number it is)
+            st.subheader("🤖 LLM Copilot Prompt Builder")
+            st.markdown("Generate targeted prompts to copy/paste into ChatGPT, Claude, or a local LLM.")
+            
+            # 1. Select the type of analysis
+            prompt_type = st.selectbox(
+                "Select Analysis Type",
+                [
+                    "Full Workbook Evaluation",
+                    "VBA: Explain Functionality & Assess Risks",
+                    "Trace Logic: Explain specific cell calculation",
+                    "Audit Triage: Prioritize deterministic flags",
+                    "Model Architecture Review"
+                ]
+            )
+            
 
-Model Name: {data.metadata.file_name}
-Has VBA Macros: {data.metadata.has_macros}
-Worksheets: {', '.join(data.worksheets.keys())}
-"""
-            st.code(system_instructions, language="markdown")
+            prompt_text = ""
+            system_role = "You are an expert Health Economist and advanced Excel Model Auditor."
+            
+            if "Full Workbook" in prompt_type:
+                schema_definition = """
+        class CellData(BaseModel):
+            address: str
+            value: Any
+            formula: Optional[str]
+            precedents: list[str]
+            dependents: list[str]
+            is_array_formula: bool
+            array_range: Optional[str]
+            parent_array_cell: Optional[str]
+            data_type: Optional[str]
+
+        class NamedRange(BaseModel):
+            name: str
+            refers_to: str
+            scope: str
+
+        class ExcelTable(BaseModel):
+            name: str
+            range_address: str
+            columns: list[str]
+
+        class WorksheetData(BaseModel):
+            name: str
+            visibility: str
+            code_name: Optional[str]
+            cells: dict[str, CellData]
+            tables: list[ExcelTable]
+
+        class VBAModule(BaseModel):
+            filename: str
+            content: str
+            linked_worksheet: Optional[str]
+
+        class WorkbookMetadata(BaseModel):
+            file_name: str
+            has_macros: bool
+            has_array_formulas: bool
+            has_data_tables: bool
+            has_named_ranges: bool
+            has_hidden_sheets: bool
+            has_external_links: bool
+            worksheet_count: int
+
+        class ExcelModelData(BaseModel):
+            metadata: WorkbookMetadata
+            worksheets: dict[str, WorksheetData]
+            named_ranges: list[NamedRange]
+            vba_modules: list[VBAModule]
+        """
+
+                prompt_text = f"""{system_role}
+
+    I have attached a large JSON file representing the full structural extraction of a health economic Excel model. 
+
+    ### Task Instructions
+    Please use your Python / Advanced Data Analysis capabilities to load this `.json` file into memory. Do not attempt to read the entire file into your text context; write Python scripts to parse it and programmatically interrogate its structure.
+
+    **Primary Goal:** I need you to evaluate the OVERALL architecture of this model. Individual cell errors are easy to find, but I need you to identify systemic mistakes, architectural flaws, and macro-level risks that are hard to spot manually.
+
+    ### Pydantic Schema Definition
+    The JSON is serialized directly from these Pydantic models. Use this to write accurate Python parsing logic:
+    ```python
+    {schema_definition}
+    ```
+
+    ### Systemic Checks to Execute via Python:
+    1. **Separation of Concerns:** Analyze cross-sheet dependencies (`precedents`). In health economics, Inputs, Engine (Markov/Decision Tree), and Results should be isolated. Flag "spaghetti logic" where calculation sheets pull directly from other calculation sheets rather than a centralized parameter dashboard.
+    2. **Hidden Vulnerabilities:** Map out any dependencies where visible calculation or result cells rely on parameters hidden in "VeryHidden" sheets or obscured by overlapping Named Ranges.
+    3. **Trace Inconsistencies:** In Markov trace sheets, formulas down a single column should be strictly identical relative to their row. Programmatically scan for "fudge factors" where a formula breaks the pattern mid-column.
+    4. **Hardcoded Risks:** Scan for formulas combining dynamic variables with hardcoded "magic numbers" (e.g., `=A1 * 0.035`), ignoring structural numbers (0, 1, -1).
+
+    ### REQUIRED OUTPUT FORMAT:
+
+    ## 1. Architectural Overview
+    [Evaluate the model's structural integrity. Does it follow best practices for health economic modeling? Describe the overall data flow.]
+
+    ## 2. Systemic & Macro-Level Risks
+    [Provide a bulleted list of systemic flaws (e.g., circular data flows, poor parameter isolation, dangerous macro usage, or structural brittleness). Explain *why* these make the model hard to validate or prone to cascading errors.]
+
+    ## 3. High-Priority Isolated Risks
+    [Provide a Markdown table of the top 10 most critical individual formula or logic risks found across the workbook.]
+    | Sheet | Cell | Issue Type | Formula / Value | Systemic Impact |
+    |---|---|---|---|---|
+    | [Name] | [A1] | [e.g., Hidden Fudge Factor] | [The raw formula] | [Explanation] |
+
+    ## 4. Audit Recommendations
+    [Provide 2-3 concrete recommendations for rebuilding or refactoring the most fragile parts of the workbook.]"""
+            # 2. Build the prompt dynamically based on selection
+            elif "VBA" in prompt_type:
+                vba_json = [m.model_dump() for m in data.vba_modules] if data.vba_modules else "No VBA modules found."
+                prompt_text = f"""{system_role}
+
+    I am auditing a health economic Excel model. Please review the following extracted VBA modules.
+
+    Task:
+    Analyze the VBA code and populate the EXACT Markdown template provided below. Do not deviate from this structure.
+
+    ### REQUIRED OUTPUT FORMAT:
+
+    ## 1. Executive Summary
+    [Provide a 2-3 sentence summary of what the VBA in this model is primarily designed to do.]
+
+    ## 2. Basic Macros (Navigation & UI)
+    [Provide a Markdown table of simple macros used for sheet navigation, resetting views, or basic formatting. Exclude calculation macros.]
+    | Macro Name | Primary Purpose |
+    |---|---|
+    | [Name] | [e.g., Navigates to the 'Setup' tab] |
+
+    ## 3. Substantive Macros (Calculations & Simulations)
+    [Provide a Markdown table of complex macros that perform logic, run Probabilistic Sensitivity Analysis (PSA) loops, or manipulate health economic inputs/outputs.]
+    | Macro Name | Logic Summary | Key Variables / Sheets Affected |
+    |---|---|---|
+    | [Name] | [Brief explanation of the calculation/simulation steps] | [e.g., 'Results' sheet, rngInitialAge] |
+
+    ## 4. Risk & Issue Register
+    [Provide a Markdown table of potential structural or logical risks to the model's validity. Focus specifically on hardcoded parameters, magic numbers, hidden logic overrides, and unsafe sheet manipulations. Do NOT flag general code inefficiencies or suggest runtime optimizations.]
+    | Severity | Location (Module/Sub) | Issue Type | Description | Recommendation |
+    |---|---|---|---|---|
+    | [High/Med/Low] | [Name] | [e.g., Hardcoded Constant] | [What is wrong] | [How to fix it safely] |
+
+    ***
+
+    Data (JSON):
+    {vba_json}"""
+
+            elif "Trace Logic" in prompt_type:
+                trace_data = st.session_state.get("last_trace", None)
+                if trace_data:
+                    prompt_text = f"""{system_role}
+
+    I have traced the logic dependency tree for a specific cell in a health economic model.
+    Target Cell: {trace_data['target']}
+
+    Task:
+    1. Explain the step-by-step logic of this calculation in plain English.
+    2. What health economic parameter is this likely calculating (e.g., transition probability, discounted cost, state membership)?
+    3. Are there any obvious structural risks in this logic chain (e.g., hardcoded constants mixed with dynamic variables)?
+
+    Trace Tree (JSON):
+    {trace_data['trace_text']}"""
+                else:
+                    prompt_text = "⚠️ Please go to the 'Audit Diagnostics' tab and run a Logic Trace first."
+
+            elif "Audit Triage" in prompt_type:
+                prompt_text = f"""{system_role}
+
+    I have run a deterministic python audit on a health economic model. Please review the findings.
+
+    Task:
+    1. Review the provided JSON containing Magic Numbers, Broken References, and Highly Complex formulas.
+    2. Prioritize the top 3 highest-risk issues that require immediate manual review.
+    3. Explain WHY these 3 pose a risk to the model's validity.
+
+    Audit Data:
+    {audits.get('magic_numbers')[:5]} # Limiting to top 5 to save tokens
+    {audits.get('complex_logic')[:5]}"""
+
+            elif "Architecture" in prompt_type:
+                sheet_names = [ws.name for ws in data.worksheets.values()]
+                named_ranges = [nr.name for nr in data.named_ranges]
+                prompt_text = f"""{system_role}
+
+    I am auditing a new health economic Excel model. I have extracted its structural metadata.
+
+    Task:
+    1. Based on the sheet names and named ranges, what type of model is this likely to be (e.g., Markov, Partitioned Survival, Decision Tree)?
+    2. Does the structure adhere to standard health economic modeling best practices (e.g., separating inputs, engine, and outputs)?
+    3. What key tabs or logic sections should I focus my manual audit on?
+
+    Sheets: {sheet_names}
+    Named Ranges (sample): {named_ranges[:20]}"""
+
+            # 3. Display the prompt
+            st.markdown("### Generated Prompt")
+            st.info("Click the copy icon in the top right of the code block below, then paste it into your LLM.")
+            st.code(prompt_text, language="markdown")
