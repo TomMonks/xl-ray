@@ -24,7 +24,7 @@ from xl_ray.audit import (
 
 st.set_page_config(page_title="XL-Ray Auditor", layout="wide")
 
-st.title("🩺 XL-Ray: Excel Model Auditor")
+st.title("🩻 XL-Ray: Excel Model Auditor")
 st.markdown("Interrogate Excel-based health economic models (Markov/Decision Trees) and generate LLM prompts for auditing.")
 
 # --- NEW: Sidebar Configuration ---
@@ -157,6 +157,114 @@ if uploaded_file is not None:
             display_audit_section("Inconsistent Column Formulas", audits["inconsistent_cols"], "📉", "No column inconsistencies found.")
             display_audit_section("Hidden Logic Dependencies", audits["hidden_logic"], "👻", "No hidden sheet dependencies found.")
             display_audit_section("High Complexity / Deep Logic", audits["complex_logic"], "🍝", "No overly complex logic found.")
+
+                    # ... (display_audit_section calls for broken_refs, complex_logic, etc.) ...
+
+        st.markdown("---")
+        st.subheader("🕵️‍♂️ Logic Dependency Tracer")
+        st.markdown("Enter a specific cell address (e.g., from the 'High Complexity' table above) to see exactly how its value is calculated.")
+
+        # Interactive form for tracing
+        col1, col2, col3 = st.columns([2, 1, 1])
+        with col1:
+            trace_sheet = st.selectbox("Select Worksheet", list(data.worksheets.keys()))
+        with col2:
+            trace_cell = st.text_input("Cell Address", placeholder="e.g., C14")
+        with col3:
+            st.markdown("<br>", unsafe_allow_html=True) # alignment hack
+            run_trace = st.button("Trace Logic")
+
+        if run_trace and trace_cell:
+            from xl_ray.audit import trace_cell_logic
+            import json
+            
+            trace_cell = trace_cell.upper().strip()
+            trace_result = trace_cell_logic(data, trace_sheet, trace_cell)
+            
+            if trace_result:
+                st.markdown("#### 🌳 Interactive Logic Tree")
+                
+                # --- Symbol Key / Legend ---
+                st.markdown(
+                    """
+                    <div style="background-color: #262730; color: #fafafa; padding: 10px; border-radius: 5px; border: 1px solid #444; margin-bottom: 15px; font-size: 13px;">
+                        <strong>Symbol Key:</strong><br>
+                        🎯 <b>Target</b>: Starting cell &nbsp;&nbsp;|&nbsp;&nbsp; 
+                        📐 <b>Formula</b>: Calculated cell &nbsp;&nbsp;|&nbsp;&nbsp; 
+                        🔹 <b>Constant</b>: Hardcoded value &nbsp;&nbsp;|&nbsp;&nbsp; 
+                        📦 <b>Range</b>: Cell block (skipped)<br>
+                        ⏭️ <b>Duplicate</b>: Already expanded elsewhere &nbsp;&nbsp;|&nbsp;&nbsp; 
+                        🔄 <b>Circular</b>: Loop detected &nbsp;&nbsp;|&nbsp;&nbsp; 
+                        ❌ <b>Missing</b>: Broken reference &nbsp;&nbsp;|&nbsp;&nbsp; 
+                        ⚠️ <b>Limit</b>: Max depth reached
+                    </div>
+                    """, 
+                    unsafe_allow_html=True
+                )
+                
+                # Recursive function to build HTML details/summary tree from the JSON structure
+                def build_html_tree(node):
+                    icons = {
+                        "formula": "📐", "constant": "🔹", "duplicate": "⏭️", 
+                        "circular": "🔄", "missing": "❌", "limit": "⚠️", "range": "📦"
+                    }
+                    
+                    node_type = node.get("type", "unknown")
+                    icon = "🎯" if node.get("is_target") else icons.get(node_type, "▪️")
+                    address = node.get("address", "")
+                    via = f" <span style='color:#888;font-size:0.9em'>(via {node.get('via')})</span>" if node.get("via") else ""
+                    
+                    if node_type == "formula":
+                        value_html = f"<code style='background-color:#333; color:#ff4b4b; padding:2px 4px; border-radius:4px;'>{node.get('value','')}</code>"
+                    elif node_type == "constant":
+                        value_html = f"<b>{node.get('value','')}</b>"
+                    else:
+                        value_html = f"<span style='color:#a0a0a0; font-style:italic;'>{node.get('value','')}</span>"
+                        
+                    header = f"{icon} <b>{address}</b>{via}: {value_html}"
+                    children = node.get("children", [])
+                    
+                    # Leaf node (no children or stopped tracing)
+                    if not children or node_type in ["duplicate", "circular", "missing", "limit"]:
+                        if node_type == "duplicate":
+                            return f"<div style='padding: 4px 0; color:#a0a0a0;'>{icon} <i>{address}</i>{via} - <span style='font-size:0.9em'>(Already expanded above)</span></div>"
+                        return f"<div style='padding: 4px 0;'>{header}</div>"
+                        
+                    # Parent node with expandable details
+                    children_html = "".join([build_html_tree(child) for child in children])
+                    
+                    # Open the root node and the first level by default for quick visibility
+                    open_attr = "open" if node.get("depth", 0) < 2 else ""
+                    
+                    # Return as a single continuous string to prevent Streamlit markdown parsing errors
+                    return f"<details {open_attr} style='margin-top: 4px;'><summary style='cursor: pointer; padding: 4px 0; outline: none;'>{header}</summary><div style='border-left: 1px dashed #555; padding-left: 20px; margin-left: 7px; margin-top: 4px; margin-bottom: 4px;'>{children_html}</div></details>"
+
+
+                interactive_tree_html = build_html_tree(trace_result)
+                
+                # Display the HTML tree
+                st.markdown(
+                    f"""
+                    <div style='background-color:#1e1e1e; color:#d4d4d4; padding:20px; border-radius:5px; 
+                                font-family:monospace; font-size:14px; line-height:1.6; 
+                                overflow-x:auto; max-height:600px; overflow-y:auto;'>
+                        {interactive_tree_html}
+                    </div>
+                    """, 
+                    unsafe_allow_html=True
+                )
+                
+                # Add a developer toggle to view the raw JSON tree directly
+                with st.expander("View Raw JSON Payload"):
+                    st.json(trace_result)
+                
+                # Pass structured JSON text to the LLM prompt state instead of flat text
+                st.session_state.last_trace = {
+                    "target": f"{trace_sheet}!{trace_cell}",
+                    "trace_text": json.dumps(trace_result, indent=2) 
+                }
+            else:
+                st.warning(f"Could not trace {trace_sheet}!{trace_cell}. Check if the address is valid.")
                 
         with tab3:
             st.markdown("Download the fully extracted structured JSON data.")

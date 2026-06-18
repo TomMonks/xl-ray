@@ -270,7 +270,7 @@ def detect_complex_logic(
         and 'flag_reason'. The list is sorted in descending order by complexity 
         score and then by chain depth.
     """
-    
+
     flagged_cells = []
     depth_cache = {}
     seen_patterns = set()
@@ -368,3 +368,100 @@ def detect_complex_logic(
                 
     flagged_cells.sort(key=lambda x: (x["complexity_score"], x["chain_depth"]), reverse=True)
     return flagged_cells
+
+def trace_cell_logic(model_data: ExcelModelData, sheet_name: str, cell_address: str, max_depth: int = 15) -> dict:
+    """
+    Recursively traces backward through a cell's precedents. 
+    Returns a nested dictionary (JSON-like structure) representing the tree.
+    """
+    global_seen = set()
+
+    def _trace(curr_sheet: str, curr_cell: str, depth: int, current_path: set, via_name: str = None) -> dict:
+        cache_key = f"{curr_sheet}!{curr_cell}"
+        
+        node = {
+            "address": cache_key,
+            "via": via_name,
+            "depth": depth,
+            "children": []
+        }
+
+        if depth > max_depth:
+            node["type"] = "limit"
+            node["value"] = "Max trace depth reached"
+            return node
+
+        if cache_key in current_path:
+            node["type"] = "circular"
+            node["value"] = "Circular reference detected"
+            return node
+
+        ws = model_data.worksheets.get(curr_sheet)
+        if not ws or curr_cell not in ws.cells:
+            node["type"] = "missing"
+            node["value"] = "Missing cell"
+            return node
+
+        cell = ws.cells[curr_cell]
+
+        # Determine node value and type
+        if cell.formula:
+            node["type"] = "formula"
+            node["value"] = cell.formula
+        else:
+            node["type"] = "constant"
+            node["value"] = cell.value
+
+        # Stop if we've already expanded this node elsewhere
+        if cache_key in global_seen:
+            node["type"] = "duplicate"
+            return node
+
+        global_seen.add(cache_key)
+
+        if not cell.precedents:
+            return node
+
+        new_path = current_path | {cache_key}
+
+        # Trace children
+        for precedent in cell.precedents:
+            target_sheet = curr_sheet
+            target_cell = precedent
+            used_named_range = None
+
+            for nr in model_data.named_ranges:
+                if nr.name == precedent:
+                    used_named_range = nr.name
+                    ref_clean = nr.refers_to.replace('$', '')
+                    if "!" in ref_clean:
+                        target_sheet = ref_clean.split("!")[0].replace("'", "").replace("=", "")
+                        target_cell = ref_clean.split("!")[1]
+                    else:
+                        target_cell = ref_clean.replace("=", "")
+                    break
+
+            if "!" in target_cell:
+                parts = target_cell.split("!")
+                target_sheet = parts[0].replace("'", "")
+                target_cell = parts[1]
+
+            if ":" in target_cell:
+                node["children"].append({
+                    "type": "range",
+                    "address": target_cell,
+                    "value": "Range block input",
+                    "depth": depth + 1,
+                    "children": []
+                })
+                continue
+
+            child_node = _trace(target_sheet, target_cell, depth + 1, new_path, used_named_range)
+            node["children"].append(child_node)
+
+        return node
+
+    # Start the trace and tag the root node
+    root_node = _trace(sheet_name, cell_address, 0, set())
+    root_node["is_target"] = True
+    return root_node
