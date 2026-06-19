@@ -7,6 +7,7 @@ from openpyxl.utils import range_boundaries, get_column_letter
 from .schema import WorkbookMetadata, VBAModule, NamedRange, ExcelTable, WorksheetData, CellData
 
 from oletools.olevba import VBA_Parser
+import re
 
 def extract_precedents_from_formula(formula_str: str) -> list[str]:
     """
@@ -119,21 +120,31 @@ def extract_worksheets(wb_formulas, wb_values) -> dict[str, WorksheetData]:
     return worksheets_data
 
 
+def _has_actual_code(content: str) -> bool:
+    """Checks if a VBA module contains anything other than boilerplate attributes."""
+    if not content:
+        return False
+    # Strip out all 'Attribute ...' lines
+    code_only = re.sub(r'(?m)^Attribute\s+.*$', '', content)
+    # Strip out 'Option Explicit' (often auto-inserted even in empty modules)
+    code_only = re.sub(r'(?mi)^\s*Option\s+Explicit\s*$', '', code_only)
+    
+    # If anything remains besides whitespace, it contains actual code
+    return bool(code_only.strip())
+
 def extract_vba_modules(path: Path, wb_formulas) -> list[VBAModule]:
-    """
-    Extract VBA macros from the workbook and return them as VBAModule schemas.
-    """
+    """Extract VBA macros from the workbook and return them as VBAModule schemas."""
     if VBA_Parser is None:
         print("Warning: oletools not installed. Skipping VBA extraction.")
         return []
 
-    # --- NEW: Build the CodeName -> Sheet Name map ---
+    # --- Build the CodeName -> Sheet Name map ---
     codename_to_tab = {}
     for sheet in wb_formulas.worksheets:
         try:
-            code_name = sheet.sheet_properties.codeName
-            if code_name:
-                codename_to_tab[code_name.lower()] = sheet.title
+            codename = sheet.sheet_properties.codeName
+            if codename:
+                codename_to_tab[codename.lower()] = sheet.title
         except AttributeError:
             continue
 
@@ -143,26 +154,29 @@ def extract_vba_modules(path: Path, wb_formulas) -> list[VBAModule]:
         if parser.detect_vba_macros():
             for _, _, filename, content in parser.extract_all_macros():
                 if isinstance(content, bytes):
-                    content = content.decode("utf-8", errors="ignore")
+                    content = content.decode('utf-8', errors='ignore')
                 else:
                     content = str(content) if content is not None else ""
-
-                # --- NEW: Check if this file maps to a worksheet ---
+                
+                # --- Skip empty/boilerplate modules ---
+                if not _has_actual_code(content):
+                    continue
+                
                 safe_filename = str(filename) or "Unknown"
-                base_name = safe_filename.split(".")[0].lower() # e.g., 'Sheet1.cls' -> 'sheet1'
-                linked_sheet = codename_to_tab.get(base_name)
-
+                basename = safe_filename.split('.')[0].lower()  # e.g., "Sheet1.cls" -> "sheet1"
+                linked_sheet = codename_to_tab.get(basename)
+                
                 modules.append(VBAModule(
                     filename=safe_filename,
                     content=content,
-                    linked_worksheet=linked_sheet  # --- NEW ---
+                    linked_worksheet=linked_sheet
                 ))
     except Exception as e:
         print(f"Warning: Failed to extract VBA modules - {e}")
     finally:
         if 'parser' in locals():
             parser.close()
-
+            
     return modules
 
 
