@@ -2,6 +2,9 @@ import re
 from typing import List, Dict, Any
 from xl_ray.schema import ExcelModelData
 
+from collections import Counter
+
+
 # ---------------------------------------------------------------------------
 # Magic Number Detector
 # ---------------------------------------------------------------------------
@@ -167,6 +170,71 @@ def detect_broken_references(model_data: ExcelModelData) -> List[Dict[str, Any]]
 
 
 def detect_inconsistent_columns(model_data: ExcelModelData) -> List[Dict[str, Any]]:
+    flagged_cells = []
+    
+    def abstract_formula(f_str):
+        if not f_str: return ""
+        return re.sub(r'([A-Za-z]+)\d+', r'\1{ROW}', f_str)
+        
+    coord_pattern = re.compile(r'^([A-Za-z]+)(\d+)$')
+    
+    for ws_name, ws_data in model_data.worksheets.items():
+        cols = {}
+        for addr, cell in ws_data.cells.items():
+            if not cell.formula: continue
+            match = coord_pattern.match(addr)
+            if match:
+                c_let, r_num = match.groups()
+                r_num = int(r_num)
+                if c_let not in cols: cols[c_let] = []
+                cols[c_let].append((r_num, cell))
+                
+        for c_let, row_cells in cols.items():
+            row_cells.sort(key=lambda x: x[0])
+            if len(row_cells) < 3: continue
+            
+            # 1. Group into contiguous blocks 
+            blocks = []
+            current_block = [row_cells[0]]
+            for i in range(1, len(row_cells)):
+                if row_cells[i][0] == row_cells[i-1][0] + 1:
+                    current_block.append(row_cells[i])
+                else:
+                    blocks.append(current_block)
+                    current_block = [row_cells[i]]
+            blocks.append(current_block)
+            
+            # 2. Analyze each block in a single pass
+            for block in blocks:
+                if len(block) < 3: continue
+                
+                # Abstract formulas exactly once per block
+                abstracted_formulas = [(r, cell, abstract_formula(cell.formula)) for r, cell in block]
+                
+                # Count pattern frequencies
+                pattern_counts = Counter(abs_f for _, _, abs_f in abstracted_formulas)
+                predominant_pattern = pattern_counts.most_common(1)[0][0]
+                
+                # Categorize the deviations
+                for r_num, cell, abs_f in abstracted_formulas:
+                    if abs_f != predominant_pattern:
+                        # If a deviation only happens 1-2 times, it's likely a manual fudge factor.
+                        # If it happens many times, it's a structural step-change.
+                        issue_type = "Isolated Override" if pattern_counts[abs_f] <= 2 else "Structural Shift"
+                        
+                        flagged_cells.append({
+                            "sheet": ws_name,
+                            "cell": cell.address,
+                            "issue_type": issue_type,
+                            "formula": cell.formula,
+                            "expected_pattern": predominant_pattern.replace("{ROW}", "{row}"),
+                            "actual_pattern": abs_f.replace("{ROW}", "{row}")
+                        })
+                        
+    return flagged_cells
+
+
+def detect_inconsistent_columns_old(model_data: ExcelModelData) -> List[Dict[str, Any]]:
     """
     Scans contiguous columns of formulas to find cells that break the established pattern.
     Useful for finding manual overrides ('fudge factors') in Markov traces or data tables.
