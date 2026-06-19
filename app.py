@@ -19,7 +19,8 @@ from xl_ray.audit import (
     detect_hidden_logic,
     detect_broken_references,
     detect_inconsistent_columns,
-    detect_complex_logic
+    detect_complex_logic,
+    detect_array_formulas
 )
 
 st.set_page_config(page_title="XL-Ray Auditor", layout="wide")
@@ -85,6 +86,7 @@ if uploaded_file is not None:
                 st.session_state.extracted_data = excel_model
                 st.session_state.current_file = uploaded_file.name
                 
+
                 # --- Run Initial Audits ---
                 st.session_state.audit_results = {
                     "broken_refs": detect_broken_references(excel_model),
@@ -96,7 +98,8 @@ if uploaded_file is not None:
                         excel_model, 
                         max_depth_threshold=ui_max_depth, 
                         complexity_score_threshold=ui_max_complexity
-                    )
+                    ),
+                    "array_formulas": detect_array_formulas(excel_model),
                 }
 
             except Exception as e:
@@ -195,6 +198,7 @@ if uploaded_file is not None:
             display_audit_section("Broken References", audits["broken_refs"], "🚨", "No broken references found.")
             display_audit_section("Hardcoded Magic Numbers", audits["magic_numbers"], "🪄", "No magic numbers found.")
             display_audit_section("Inconsistent Column Formulas", audits["inconsistent_cols"], "📉", "No column inconsistencies found.")
+            display_audit_section("Array Formulas", audits.get('array_formulas'), "📊", "No array formulas found.")
             display_audit_section("Hidden Logic Dependencies", audits["hidden_logic"], "👻", "No hidden sheet dependencies found.")
             display_audit_section("High Complexity / Deep Logic", audits["complex_logic"], "🍝", "No overly complex logic found.")
 

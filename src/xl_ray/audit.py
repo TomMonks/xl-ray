@@ -465,3 +465,19 @@ def trace_cell_logic(model_data: ExcelModelData, sheet_name: str, cell_address: 
     root_node = _trace(sheet_name, cell_address, 0, set())
     root_node["is_target"] = True
     return root_node
+
+def detect_array_formulas(model_data: ExcelModelData) -> List[Dict[str, Any]]:
+    """Detect which cells contain array formulas to flag up to user.
+    """
+    flagged_cells = []
+    for ws_name, ws_data in model_data.worksheets.items():
+        for cell_address, cell in ws_data.cells.items():
+            if cell.is_array_formula:
+                flagged_cells.append({
+                    "sheet": ws_name,
+                    "cell": cell_address,
+                    "formula": cell.formula,
+                    "array_range": cell.array_range,
+                    "is_parent": "Yes" if cell.parent_array_cell is None else "No (Spilled)"
+                })
+    return flagged_cells
