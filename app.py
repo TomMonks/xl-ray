@@ -322,7 +322,11 @@ if uploaded_file is not None:
                         display_title += f" — 🏷️ Worksheet: '{mod.linked_worksheet}'"
                     elif mod.filename.lower().endswith(".cls") and "thisworkbook" not in mod.filename.lower():
                         display_title += " — 🏷️ Worksheet module"
-                    
+
+                    if mod.content:
+                        line_count = len(mod.content.splitlines())
+                        display_title += f" | {line_count} lines"
+
                     display_code = mod.content if mod.content else "' No code found in this module."
                     
                     with st.expander(display_title):
