@@ -53,13 +53,13 @@ Step through any cell's computation tree. See formulas, constants, and reference
 
 - Python >=3.11
 
-### Install via Conda / Mamba
+### Install via Conda
 
 ```bash
 git clone https://github.com/TomMonks/xl-ray.git
+cd xl-ray
 conda env create -f environment.yml
 conda activate xl-ray
-hatch shell
 ```
 
 ### Dependencies
