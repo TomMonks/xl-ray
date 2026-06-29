@@ -2,7 +2,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 from openpyxl.worksheet.formula import ArrayFormula
 from openpyxl.formula import Tokenizer
-from openpyxl.utils import range_boundaries, get_column_letter
+from openpyxl.utils import range_boundaries, get_column_letter, coordinate_to_tuple
 
 from .schema import WorkbookMetadata, VBAModule, NamedRange, ExcelTable, WorksheetData, CellData
 
@@ -33,9 +33,16 @@ def extract_precedents_from_formula(formula_str: str) -> list[str]:
     return sorted(list(precedents))
 
 
+
+
 def extract_worksheets(wb_formulas, wb_values) -> dict[str, WorksheetData]:
     worksheets_data = {}
     
+    # --- OPTIMIZED: Track references without unrolling ranges ---
+    exact_referenced_cells = set()  # Fast O(1) lookup for single cells like "Sheet1!A1"
+    range_references = {}           # Dict mapping sheet_name -> list of (min_col, min_row, max_col, max_row)
+    # ------------------------------------------------------------
+
     for sheet_f, sheet_v in zip(wb_formulas.worksheets, wb_values.worksheets):
         sheet_name = sheet_f.title
         state_map = {"visible": "Visible", "hidden": "Hidden", "veryHidden": "VeryHidden"}
@@ -65,60 +72,100 @@ def extract_worksheets(wb_formulas, wb_values) -> dict[str, WorksheetData]:
                         array_range = str(getattr(val_f, "ref", None) or "")
                     else:
                         formula_str = str(getattr(val_f, "value", None) or val_f)
-                
+                        
                     precedents = extract_precedents_from_formula(formula_str)
-
+                    
+                    # --- OPTIMIZED: Store ranges as mathematical boundaries ---
+                    for p in precedents:
+                        if "!" in p:
+                            sheet_part, cell_part = p.split("!")
+                            sheet_part = sheet_part.replace("'", "")
+                        else:
+                            sheet_part = sheet_name
+                            cell_part = p
+                            
+                        if ":" in cell_part:
+                            try:
+                                bounds = range_boundaries(cell_part)
+                                if sheet_part not in range_references:
+                                    range_references[sheet_part] = []
+                                range_references[sheet_part].append(bounds)
+                            except Exception:
+                                exact_referenced_cells.add(f"{sheet_part}!{cell_part}")
+                        else:
+                            exact_referenced_cells.add(f"{sheet_part}!{cell_part}")
+                    # -----------------------------------------------------------
+                    
                 data_type = cell_v.data_type if cell_v.data_type else cell_f.data_type
                 
                 cells_dict[address] = CellData(
                     address=address,
-                    value=cell_v.value,  
+                    value=cell_v.value,
                     formula=formula_str,
                     precedents=precedents,
                     is_array_formula=is_array,
                     array_range=array_range,
                     data_type=data_type
                 )
-        
-        # --- NEW: Array Formula Spill Propagation ---
-        # Find all cells we just extracted that act as the "parent" of an array
+                
+        # --- Array Formula Spill Propagation ---
         array_parents = {addr: cell for addr, cell in cells_dict.items() if cell.is_array_formula and cell.array_range}
-        
+
         for parent_addr, parent_cell in array_parents.items():
             if ':' in parent_cell.array_range:
-                # Get the boundaries of the array (e.g., 'A1:B3' -> min_col=1, min_row=1, max_col=2, max_row=3)
                 min_col, min_row, max_col, max_row = range_boundaries(parent_cell.array_range)
-                
+
                 for row in range(min_row, max_row + 1):
                     for col in range(min_col, max_col + 1):
                         col_letter = get_column_letter(col)
                         child_addr = f"{col_letter}{row}"
-                        
+
                         if child_addr == parent_addr:
-                            continue # Skip the parent cell itself
-                            
+                            continue
+
                         if child_addr in cells_dict:
-                            # Update existing cell
                             cells_dict[child_addr].is_array_formula = True
                             cells_dict[child_addr].parent_array_cell = parent_addr
                         else:
-                            # If the spilled cell is completely empty/None in openpyxl, create it
                             cells_dict[child_addr] = CellData(
                                 address=child_addr,
                                 is_array_formula=True,
                                 parent_array_cell=parent_addr
                             )
-        # --- END NEW ---
-
+        # --- END Array Formula Spill Propagation ---
+        
         worksheets_data[sheet_name] = WorksheetData(
             name=sheet_name,
             visibility=visibility,
             cells=cells_dict,
             tables=sheet_tables
         )
-        
-    return worksheets_data
 
+    # --- OPTIMIZED: Second pass using bounding box checks ---
+    for sheet_name, ws_data in worksheets_data.items():
+        # Pre-fetch the list of bounding boxes for this sheet to avoid dictionary lookups in the loop
+        sheet_bounds = range_references.get(sheet_name, [])
+        
+        for cell_address, cell in ws_data.cells.items():
+            if cell.formula:
+                # 1. Check exact O(1) match first
+                global_address = f"{sheet_name}!{cell_address}"
+                is_used = global_address in exact_referenced_cells
+                
+                # 2. If not exactly matched, check if it falls inside any bounding box
+                if not is_used and sheet_bounds:
+                    row_idx, col_idx = coordinate_to_tuple(cell_address)
+                    for min_col, min_row, max_col, max_row in sheet_bounds:
+                        if (min_row <= row_idx <= max_row) and (min_col <= col_idx <= max_col):
+                            is_used = True
+                            break # Found a match, no need to check other boxes
+                            
+                # If it's never referenced exactly or inside a range, it is terminal
+                if not is_used:
+                    cell.is_terminal = True
+    # --------------------------------------------------------
+
+    return worksheets_data
 
 def _has_actual_code(content: str) -> bool:
     """Checks if a VBA module contains anything other than boilerplate attributes."""
