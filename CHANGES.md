@@ -14,6 +14,7 @@ Terminal cells. i.e. track cells with no forward depenendicies.
 * `schema.CellData` now has `is_terminal` flag
 * `extractor.extract_worksheets` updated to perform 2nd pass on cells to identify forward references.
 * `app.py` audit tab updated to include section on terminal cells.
+* `xl-ray.__version__` displayed in app sidebar.
 
 ### Added
 
