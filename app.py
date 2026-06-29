@@ -3,6 +3,7 @@ import gzip
 from pathlib import Path
 import streamlit as st
 
+
 # Import extraction logic and schemas
 from xl_ray.extractor import (
     load_workbooks, 
@@ -12,6 +13,8 @@ from xl_ray.extractor import (
     extract_worksheets
 )
 from xl_ray.schema import ExcelModelData
+
+from xl_ray import __version__
 
 # --- NEW: Import Audit Functions ---
 from xl_ray.audit import (
@@ -44,6 +47,10 @@ with st.sidebar:
         min_value=5, max_value=100, value=25, 
         help="Flags formulas scoring above this threshold based on nested parentheses and specific functions."
     )
+
+    # --- NEW: Version info at the bottom of the sidebar ---
+    st.divider()
+    st.caption(f"Powered by `xl-ray` v{__version__}")
 
 # --- 1. File Upload ---
 uploaded_file = st.file_uploader("Upload an Excel Model (.xlsx, .xlsm)", type=["xlsx", "xlsm"])
