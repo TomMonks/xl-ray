@@ -85,10 +85,23 @@ if uploaded_file is not None:
                 # Save base data to session state
                 st.session_state.extracted_data = excel_model
                 st.session_state.current_file = uploaded_file.name
+
+                # --- NEW: v0.2.0 Extract Terminal Cells for UI ---
+                terminal_cells_list = []
+                for ws_name, ws_data in excel_model.worksheets.items():
+                    for cell_addr, cell in ws_data.cells.items():
+                        if getattr(cell, 'is_terminal', False):
+                            terminal_cells_list.append({
+                                "sheet": ws_name,
+                                "cell": cell_addr,
+                                "formula": cell.formula,
+                                "value": str(cell.value)
+                            })
                 
 
                 # --- Run Initial Audits ---
                 st.session_state.audit_results = {
+                    "terminal_cells": terminal_cells_list, # TM added v0.2.0
                     "broken_refs": detect_broken_references(excel_model),
                     "magic_numbers": detect_magic_numbers(excel_model),
                     "inconsistent_cols": detect_inconsistent_columns(excel_model),
@@ -195,6 +208,12 @@ if uploaded_file is not None:
                 else:
                     st.success(f"{icon} {title}: {empty_msg}")
 
+            display_audit_section(
+                    "Terminal Cells (Model Outputs)", 
+                    audits.get("terminal_cells", []), 
+                    "🛑", 
+                    "No terminal cells found."
+                )
             display_audit_section("Broken References", audits["broken_refs"], "🚨", "No broken references found.")
             display_audit_section("Hardcoded Magic Numbers", audits["magic_numbers"], "🪄", "No magic numbers found.")
             display_audit_section("Inconsistent Column Formulas", audits["inconsistent_cols"], "📉", "No column inconsistencies found.")
