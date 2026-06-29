@@ -16,6 +16,13 @@ class CellData(BaseModel):
         description="List of cell addresses or named ranges this cell references (its inputs)."
     )
     
+    # ---new for v0.2.0 ---
+    is_terminal: bool = Field(
+        default=False, 
+        description="True if this cell contains a formula but is never referenced by any other formula (a DAG sink node)."
+    )
+    # -----------------
+
     dependents: list[str] = Field(
         default_factory=list, 
         description="List of cell addresses that reference this cell (its outputs)."
