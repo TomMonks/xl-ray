@@ -4,6 +4,7 @@ from xl_ray.schema import ExcelModelData
 
 from collections import Counter
 
+from openpyxl.utils.cell import coordinate_to_tuple, get_column_letter
 
 # ---------------------------------------------------------------------------
 # Magic Number Detector
@@ -87,6 +88,167 @@ def extract_numeric_constants(
             })
 
     return constants
+
+
+def add_cell_context(
+    model_data: ExcelModelData,
+    parameter: dict[str, Any],
+    *,
+    rows_above: int = 3,
+    rows_below: int = 1,
+    columns_left: int = 3,
+    columns_right: int = 2,
+) -> dict[str, Any]:
+    """
+    Add neighbouring worksheet cells to a single cell record.
+
+    Parameters
+    ----------
+    model_data : ExcelModelData
+        Extracted workbook containing worksheet and cell data.
+    parameter : dict[str, Any]
+        Target record containing ``sheet`` and ``cell`` keys.
+    rows_above : int, optional
+        Rows to include above the target. Default is 3.
+    rows_below : int, optional
+        Rows to include below the target. Default is 1.
+    columns_left : int, optional
+        Columns to include to the left. Default is 3.
+    columns_right : int, optional
+        Columns to include to the right. Default is 2.
+
+    Returns
+    -------
+    dict[str, Any]
+        Copy of the target record with a ``context`` list containing
+        neighbouring cell addresses, values, formulas, and relative offsets.
+
+    Raises
+    ------
+    KeyError
+        If ``sheet`` or ``cell`` is missing.
+    ValueError
+        If window sizes are invalid or the target cannot be found.
+
+    Notes
+    -----
+    Excludes the target and empty cells. Clips the window to worksheet
+    boundaries. Preserves input fields but replaces any existing context.
+    """
+    window_sizes = (
+        rows_above,
+        rows_below,
+        columns_left,
+        columns_right,
+    )
+    if any(
+        isinstance(size, bool) or not isinstance(size, int) or size < 0
+        for size in window_sizes
+    ):
+        raise ValueError("Context window sizes must be non-negative integers.")
+
+    sheet_name = parameter["sheet"]
+    address = parameter["cell"].replace("$", "").upper()
+
+    worksheet = model_data.worksheets.get(sheet_name)
+    if worksheet is None:
+        raise ValueError(f"Worksheet not found: {sheet_name!r}")
+
+    if address not in worksheet.cells:
+        raise ValueError(f"Cell not found: {sheet_name!r}!{address}")
+
+    target_row, target_column = coordinate_to_tuple(address)
+
+    first_row = max(1, target_row - rows_above)
+    last_row = min(1_048_576, target_row + rows_below)
+    first_column = max(1, target_column - columns_left)
+    last_column = min(16_384, target_column + columns_right)
+
+    context = []
+
+    for row in range(first_row, last_row + 1):
+        for column in range(first_column, last_column + 1):
+            neighbour_address = f"{get_column_letter(column)}{row}"
+
+            if neighbour_address == address:
+                continue
+
+            neighbour = worksheet.cells.get(neighbour_address)
+            if neighbour is None:
+                continue
+
+            if neighbour.value is None and neighbour.formula is None:
+                continue
+
+            context.append({
+                "cell": neighbour_address,
+                "value": neighbour.value,
+                "formula": neighbour.formula,
+                "row_offset": row - target_row,
+                "column_offset": column - target_column,
+            })
+
+    return {
+        **parameter,
+        "context": context,
+    }
+
+
+def add_context_to_parameters(
+    model_data: ExcelModelData,
+    parameters: list[dict[str, Any]],
+    *,
+    rows_above: int = 3,
+    rows_below: int = 1,
+    columns_left: int = 3,
+    columns_right: int = 2,
+) -> list[dict[str, Any]]:
+    """
+    Add neighbouring worksheet context to a list of cell records.
+
+    Parameters
+    ----------
+    model_data : ExcelModelData
+        Extracted workbook containing worksheet and cell data.
+    parameters : list[dict[str, Any]]
+        Target records, each containing ``sheet`` and ``cell`` keys.
+    rows_above : int, optional
+        Rows to include above each target. Default is 3.
+    rows_below : int, optional
+        Rows to include below each target. Default is 1.
+    columns_left : int, optional
+        Columns to include to the left. Default is 3.
+    columns_right : int, optional
+        Columns to include to the right. Default is 2.
+
+    Returns
+    -------
+    list[dict[str, Any]]
+        Enriched copies of the records in their original order.
+
+    Raises
+    ------
+    KeyError
+        If a record is missing ``sheet`` or ``cell``.
+    ValueError
+        If window sizes are invalid or a target cannot be found.
+
+    Notes
+    -----
+    Calls ``add_cell_context`` for each record without modifying the inputs.
+    An empty list returns an empty list without validating window sizes.
+    """
+    return [
+        add_cell_context(
+            model_data,
+            parameter,
+            rows_above=rows_above,
+            rows_below=rows_below,
+            columns_left=columns_left,
+            columns_right=columns_right,
+        )
+        for parameter in parameters
+    ]
 
 # ---------------------------------------------------------------------------
 # Hidden Logic Flag
