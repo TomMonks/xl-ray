@@ -11,7 +11,7 @@ Input cell candidates functionality.
 
 ## Added
 
-
+* `audit.extract_numeric_constants`  - Return numeric values stored directly in cells. Excludes formulas.
 
 ## 0.3.0 2026-09-02
 
