@@ -52,21 +52,37 @@ def detect_magic_numbers(model_data: ExcelModelData) -> List[Dict[str, Any]]:
 
 def extract_numeric_constants(
     model_data: ExcelModelData,
+    *,
+    exclude_sheets: list[str] | None = None,
 ) -> List[Dict[str, Any]]:
     """
-    Return numeric values stored directly in cells.
+    Extract directly stored numeric values from workbook cells.
 
-    Includes zero and one.
-    Excludes formulas, array-formula results, booleans,
-    text, blanks, and date/datetime objects.
+    Parameters
+    ----------
+    model_data : ExcelModelData
+        Extracted workbook containing worksheet and cell data.
+    exclude_sheets : list[str] or None, optional
+        Worksheet names to exclude, matched exactly. Default is None.
 
-    These are candidate inputs, not confirmed model parameters.
+    Returns
+    -------
+    list[dict[str, Any]]
+        Numeric cell records containing sheet, cell, value, and visibility.
+
+    Notes
+    -----
+    Includes zero and one. Excludes formulas, array-formula results,
+    booleans, and non-numeric values. Unknown sheet names are ignored.
     """
+    excluded = set(exclude_sheets or [])
     constants = []
 
     for sheet_name, worksheet in model_data.worksheets.items():
+        if sheet_name in excluded:
+            continue
+
         for address, cell in worksheet.cells.items():
-            # Exclude calculated values, including array spill cells.
             if (
                 cell.formula is not None
                 or cell.is_array_formula
@@ -76,7 +92,6 @@ def extract_numeric_constants(
 
             value = cell.value
 
-            # Explicitly exclude booleans rather than treating them as numbers.
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 continue
 
