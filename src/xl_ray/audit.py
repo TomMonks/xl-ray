@@ -53,34 +53,53 @@ def detect_magic_numbers(model_data: ExcelModelData) -> List[Dict[str, Any]]:
 def extract_numeric_constants(
     model_data: ExcelModelData,
     *,
-    exclude_sheets: list[str] | None = None,
+    sheets: str | list[str] | None = None,
 ) -> List[Dict[str, Any]]:
     """
-    Extract directly stored numeric values from workbook cells.
+    Extract directly stored numeric values from selected worksheets.
 
     Parameters
     ----------
     model_data : ExcelModelData
         Extracted workbook containing worksheet and cell data.
-    exclude_sheets : list[str] or None, optional
-        Worksheet names to exclude, matched exactly. Default is None.
+    sheets : str, list[str], or None, optional
+        Worksheet name or names to include, matched exactly.
+        Default is None, which includes all worksheets.
 
     Returns
     -------
     list[dict[str, Any]]
         Numeric cell records containing sheet, cell, value, and visibility.
 
+    Raises
+    ------
+    ValueError
+        If a requested worksheet does not exist.
+
     Notes
     -----
     Includes zero and one. Excludes formulas, array-formula results,
-    booleans, and non-numeric values. Unknown sheet names are ignored.
+    booleans, and non-numeric values. An empty sheet list returns no records.
     """
-    excluded = set(exclude_sheets or [])
+    if sheets is None:
+        selected_sheets = list(model_data.worksheets)
+    elif isinstance(sheets, str):
+        selected_sheets = [sheets]
+    else:
+        # Remove duplicates while preserving the requested order.
+        selected_sheets = list(dict.fromkeys(sheets))
+
+    missing = [
+        name for name in selected_sheets
+        if name not in model_data.worksheets
+    ]
+    if missing:
+        raise ValueError(f"Worksheets not found: {missing}")
+
     constants = []
 
-    for sheet_name, worksheet in model_data.worksheets.items():
-        if sheet_name in excluded:
-            continue
+    for sheet_name in selected_sheets:
+        worksheet = model_data.worksheets[sheet_name]
 
         for address, cell in worksheet.cells.items():
             if (
