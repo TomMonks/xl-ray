@@ -44,6 +44,50 @@ def detect_magic_numbers(model_data: ExcelModelData) -> List[Dict[str, Any]]:
                 
     return flagged_cells
 
+
+# ---------------------------------------------------------------------------
+# Candidate model inputs
+# ---------------------------------------------------------------------------
+
+def extract_numeric_constants(
+    model_data: ExcelModelData,
+) -> List[Dict[str, Any]]:
+    """
+    Return numeric values stored directly in cells.
+
+    Includes zero and one.
+    Excludes formulas, array-formula results, booleans,
+    text, blanks, and date/datetime objects.
+
+    These are candidate inputs, not confirmed model parameters.
+    """
+    constants = []
+
+    for sheet_name, worksheet in model_data.worksheets.items():
+        for address, cell in worksheet.cells.items():
+            # Exclude calculated values, including array spill cells.
+            if (
+                cell.formula is not None
+                or cell.is_array_formula
+                or cell.parent_array_cell is not None
+            ):
+                continue
+
+            value = cell.value
+
+            # Explicitly exclude booleans rather than treating them as numbers.
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue
+
+            constants.append({
+                "sheet": sheet_name,
+                "cell": address,
+                "value": value,
+                "visibility": worksheet.visibility,
+            })
+
+    return constants
+
 # ---------------------------------------------------------------------------
 # Hidden Logic Flag
 # ---------------------------------------------------------------------------
